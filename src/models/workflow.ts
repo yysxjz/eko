@@ -2,6 +2,8 @@ import { ExecutionLogger, LogOptions } from "@/utils/execution-logger";
 import { Workflow, WorkflowNode, NodeInput, ExecutionContext, LLMProvider, WorkflowCallback, WorkflowSummary, Message } from "../types";
 import { EkoConfig, WorkflowResult } from "../types/eko.types";
 import { summarizeWorkflow } from "@/common/summarize-workflow";
+import {ReflexionLLM} from "@/memory/reflexion_llm";
+import {OpenaiProvider} from "@/services/llm/openai-provider";
 
 export class WorkflowImpl implements Workflow {
   abort?: boolean;
@@ -139,6 +141,12 @@ export class WorkflowImpl implements Workflow {
       workflowSummary = await summarizeWorkflow(this.llmProvider, this, this.variables, node_outputs);
     } else {
       console.warn("WorkflowImpl.llmProvider is undefined, cannot generate workflow summary");
+    }
+
+
+    if(workflowSummary?.isSuccessful&& this.llmProvider instanceof OpenaiProvider){
+      let llm = new ReflexionLLM(this.llmProvider)
+      await llm.setReflexion(all_reacts,this.name);
     }
     
     // Special context variables

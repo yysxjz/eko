@@ -27,6 +27,7 @@ interface PartialToolUse {
 export class OpenaiProvider implements LLMProvider {
   private client: OpenAI;
   private defaultModel = 'gpt-4o';
+  readonly apikey:string = "";
 
   constructor(client: OpenAI, defaultModel?: string);
   constructor(options: ClientOptions, defaultModel?: string);
@@ -56,6 +57,7 @@ export class OpenaiProvider implements LLMProvider {
       `);
     }
     if (typeof param == 'string') {
+      this.apikey = param;
       this.client = new OpenAI({
         apiKey: param,
         dangerouslyAllowBrowser: true,

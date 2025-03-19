@@ -12,6 +12,9 @@ import {
 } from '../types/llm.types';
 import { ExecutionLogger } from '@/utils/execution-logger';
 import { WriteContextTool } from '@/common/tools/write_context';
+import {IndexDBStore} from "@/memory/retriever";
+import {OpenaiProvider} from "@/services/llm/openai-provider";
+import {ReflexionLLM} from "@/memory/reflexion_llm";
 
 function createReturnTool(
   actionName: string,
@@ -338,6 +341,21 @@ export class ActionImpl implements Action {
     context.tools?.forEach((tool) => toolMap.set(tool.name, tool));
     toolMap.set(returnTool.name, returnTool);
 
+    console.log(`the description is : ${this.description}`);
+
+
+    if(context.llmProvider instanceof OpenaiProvider){
+      console.log("the llm provider is openai")
+      let llm = new ReflexionLLM(context.llmProvider)
+      await llm.init()
+      const steps = await llm.getReflexion(this.description)
+      if (steps){
+        console.log("the steps is :"+steps)
+        this.description = `${this.description} the example you can reference to plan is ${steps}`
+      }
+    }
+
+    console.log("the format user prompt is"+this.formatUserPrompt(this.name, this.description))
     // Prepare initial messages
     const messages: Message[] = [
       { role: 'system', content: this.formatSystemPrompt() },
