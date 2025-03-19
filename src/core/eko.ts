@@ -1,6 +1,5 @@
+import { LLMProviderFactory } from '../services/llm/provider-factory';
 import { WorkflowGenerator } from '../services/workflow/generator';
-import { ClaudeProvider } from '../services/llm/claude-provider';
-import { OpenaiProvider } from '../services/llm/openai-provider';
 import {
   LLMConfig,
   EkoConfig,
@@ -8,11 +7,9 @@ import {
   LLMProvider,
   Tool,
   Workflow,
-  ClaudeConfig,
-  OpenaiConfig,
   WorkflowCallback,
-  NodeOutput,
   ExecutionContext,
+  WorkflowResult
 } from '../types';
 import { ToolRegistry } from './tool-registry';
 
@@ -26,46 +23,63 @@ export class Eko {
   private ekoConfig: EkoConfig;
   private toolRegistry = new ToolRegistry();
   private workflowGeneratorMap = new Map<Workflow, WorkflowGenerator>();
+  public prompt: string = "";
 
   constructor(llmConfig: LLMConfig, ekoConfig?: EkoConfig) {
-    if (typeof llmConfig == 'string') {
-      this.llmProvider = new ClaudeProvider(llmConfig);
-    } else if ('llm' in llmConfig) {
-      if (llmConfig.llm == 'claude') {
-        let claudeConfig = llmConfig as ClaudeConfig;
-        this.llmProvider = new ClaudeProvider(
-          claudeConfig.apiKey,
-          claudeConfig.modelName,
-          claudeConfig.options
-        );
-      } else if (llmConfig.llm == 'openai') {
-        let openaiConfig = llmConfig as OpenaiConfig;
-        this.llmProvider = new OpenaiProvider(
-          openaiConfig.apiKey,
-          openaiConfig.modelName,
-          openaiConfig.options
-        );
-      } else {
-        let msg: string = 'Unknown parameter: llm > ' + llmConfig['llm'];
-        console.error(msg)
-        throw new Error(msg);
-      }
-    } else {
-      this.llmProvider = llmConfig as LLMProvider;
-    }
+    console.info("using Eko@" + process.env.COMMIT_HASH);
+    console.warn("this version is POC, should not used for production");
+    this.llmProvider = LLMProviderFactory.buildLLMProvider(llmConfig);
+    this.ekoConfig = this.buildEkoConfig(ekoConfig);
+    this.registerTools();
+  }
 
-    if (ekoConfig) {
-      this.ekoConfig = ekoConfig;
-    } else {
-      this.ekoConfig = {
-        workingWindowId: undefined,
+  private buildEkoConfig(ekoConfig: Partial<EkoConfig> | undefined): EkoConfig {
+    if (!ekoConfig) {
+      console.warn("`ekoConfig` is missing when construct `Eko` instance");
+    }
+    const defaultEkoConfig: EkoConfig = {
+      workingWindowId: undefined,
+      chromeProxy: chrome,
+      callback: undefined,
+    };
+    return {
+      ...defaultEkoConfig,
+      ...ekoConfig,
+    };
+  }
+
+  private registerTools() {
+    let tools = Array.from(Eko.tools.entries()).map(([_key, tool]) => tool);
+
+    // filter human tools by callbacks
+    const callback = this.ekoConfig.callback;
+    if (callback) {
+      const hooks = callback.hooks;
+
+      // these tools could not work without corresponding hook
+      const tool2isHookExists: { [key: string]: boolean } = {
+        "human_input_text": Boolean(hooks.onHumanInputText),
+        "human_input_single_choice": Boolean(hooks.onHumanInputSingleChoice),
+        "human_input_multiple_choice": Boolean(hooks.onHumanInputMultipleChoice),
+        "human_operate": Boolean(hooks.onHumanOperate),
       };
+      tools = tools.filter(tool => {
+        if (tool.name in tool2isHookExists) {
+          let isHookExists = tool2isHookExists[tool.name]
+          return isHookExists;
+        } else {
+          return true;
+        }
+      });
+    } else {
+      console.warn("`ekoConfig.callback` is missing when construct `Eko` instance.")
     }
-
-    Eko.tools.forEach((tool) => this.toolRegistry.registerTool(tool));
+    
+    tools.forEach(tool => this.toolRegistry.registerTool(tool));
   }
 
   public async generate(prompt: string, param?: EkoInvokeParam): Promise<Workflow> {
+    this.prompt = prompt;
     let toolRegistry = this.toolRegistry;
     if (param && param.tools && param.tools.length > 0) {
       toolRegistry = new ToolRegistry();
@@ -81,10 +95,57 @@ export class Eko {
     const generator = new WorkflowGenerator(this.llmProvider, toolRegistry);
     const workflow = await generator.generateWorkflow(prompt, this.ekoConfig);
     this.workflowGeneratorMap.set(workflow, generator);
+    console.log("the workflow returned by generate");
+    console.log(workflow);
     return workflow;
   }
 
-  public async execute(workflow: Workflow, callback?: WorkflowCallback): Promise<NodeOutput[]> {
+  public async execute(workflow: Workflow): Promise<WorkflowResult> {
+    let prompt = this.prompt;
+    const json = {
+      "id": "workflow_id",
+      "name": prompt,
+      "description": prompt,
+      "nodes": [
+        {
+          "id": "sub_task_id",
+          "type": "action",
+          "action": {
+            "type": "prompt",
+            "name": prompt,
+            "description": prompt,
+            "tools": [
+              "browser_use",
+              "cancel_workflow",
+              "document_agent",
+              "export_file",
+              "extract_content",
+              "get_all_tabs",
+              "open_url",
+              "screenshot",
+              "tab_management",
+              "web_search",
+              "human_input_text",
+              "human_input_single_choice",
+              "human_input_multiple_choice",
+              "human_operate",
+            ],
+          },
+          "dependencies": []
+        },
+      ],
+    };
+    console.log("debug the workflow...");
+    console.log(json);
+    console.log("debug the workflow...done");
+    
+    console.log("debug the LLMProvider...");
+    console.log(this.llmProvider);
+    console.log("debug the LLMProvider...done");
+    
+    const generator = new WorkflowGenerator(this.llmProvider, this.toolRegistry);  
+    workflow = await generator.generateWorkflowFromJson(json, this.ekoConfig);
+
     // Inject LLM provider at workflow level
     workflow.llmProvider = this.llmProvider;
 
@@ -104,7 +165,9 @@ export class Eko {
       }
     }
 
-    return await workflow.execute(callback);
+    const result = await workflow.execute(this.ekoConfig.callback);
+    console.log(result);
+    return result;
   }
 
   public async cancel(workflow: Workflow): Promise<void> {

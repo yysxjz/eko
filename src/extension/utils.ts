@@ -4,14 +4,14 @@ export async function getWindowId(context: ExecutionContext): Promise<number> {
   let windowId = context.variables.get('windowId') as any;
   if (windowId) {
     try {
-      await chrome.windows.get(windowId);
+      await context.ekoConfig.chromeProxy.windows.get(windowId);
     } catch (e) {
       windowId = null;
       context.variables.delete('windowId');
       let tabId = context.variables.get('tabId') as any;
       if (tabId) {
         try {
-          let tab = await chrome.tabs.get(tabId);
+          let tab = await context.ekoConfig.chromeProxy.tabs.get(tabId);
           windowId = tab.windowId;
         } catch (e) {
           context.variables.delete('tabId');
@@ -19,10 +19,21 @@ export async function getWindowId(context: ExecutionContext): Promise<number> {
       }
     }
   }
+
   if (!windowId) {
-    const window = await chrome.windows.getCurrent();
+    const window = await context.ekoConfig.chromeProxy.windows.getCurrent();
     windowId = window.id;
   }
+
+  // `window.FELLOU_WINDOW_ID` is a feature of Downstream Caller
+  if (!windowId) {
+    windowId = (window as any).FELLOU_WINDOW_ID;
+  }
+
+  if (!windowId) {
+    console.warn("`getWindowId()` returns " + windowId);
+  }
+
   return windowId as number;
 }
 
@@ -30,7 +41,7 @@ export async function getTabId(context: ExecutionContext): Promise<number> {
   let tabId = context.variables.get('tabId') as any;
   if (tabId) {
     try {
-      await chrome.tabs.get(tabId);
+      await context.ekoConfig.chromeProxy.tabs.get(tabId);
     } catch (e) {
       tabId = null;
       context.variables.delete('tabId');
@@ -38,16 +49,22 @@ export async function getTabId(context: ExecutionContext): Promise<number> {
   }
 
   if (!tabId) {
-    let windowId = context.variables.get('windowId') as any;
+    console.log("tabId is empty");
+    let windowId = await getWindowId(context);
+    console.log(`windowId=${windowId}`);
     if (windowId) {
       try {
-        tabId = await getCurrentTabId(windowId);
+        tabId = await getCurrentTabId(context.ekoConfig.chromeProxy, windowId);
+        console.log("getCurrentTabId(context.ekoConfig.chromeProxy, windowId) returns " + tabId);
       } catch (e) {
-        tabId = await getCurrentTabId();
+        tabId = await getCurrentTabId(context.ekoConfig.chromeProxy);
+        console.log("getCurrentTabId(context.ekoConfig.chromeProxy, windowId) throws an error");
+        console.log("getCurrentTabId(context.ekoConfig.chromeProxy) returns " + tabId);
         context.variables.delete('windowId');
       }
     } else {
-      tabId = await getCurrentTabId();
+      tabId = await getCurrentTabId(context.ekoConfig.chromeProxy);
+      console.log("getCurrentTabId(context.ekoConfig.chromeProxy) #2 returns " + tabId);
     }
 
     if (!tabId) {
@@ -59,50 +76,50 @@ export async function getTabId(context: ExecutionContext): Promise<number> {
   return tabId;
 }
 
-export function getCurrentTabId(windowId?: number | undefined): Promise<number | undefined> {
+export function getCurrentTabId(chromeProxy: any, windowId?: number | undefined): Promise<number | undefined> {
   return new Promise((resolve, reject) => {
-    chrome.tabs.query({ windowId, active: true, lastFocusedWindow: true }, function (tabs) {
-      if (chrome.runtime.lastError) {
-        console.error('Chrome runtime error:', chrome.runtime.lastError);
-        reject(chrome.runtime.lastError);
+    console.debug("[getCurrentTabId] get the active tabId on: ", { windowId });
+    let queryInfo: chrome.tabs.QueryInfo;
+    if (windowId !== undefined) {
+      console.debug(`[getCurrentTabId] get the active tab in window (windowId=${windowId})...`);
+      queryInfo = { windowId, active: true };
+    } else {
+      console.debug(`[getCurrentTabId] get the active tabId on current window`);
+      queryInfo = { active: true, currentWindow: true };
+    }
+    chrome.tabs.query(queryInfo, (tabs: chrome.tabs.Tab[]) => {
+      if (chromeProxy.runtime.lastError) {
+        console.error(`[getCurrentTabId] failed to get: `, chromeProxy.runtime.lastError);
+        reject(chromeProxy.runtime.lastError);
         return;
       }
       if (tabs.length > 0) {
+        console.debug(`[getCurrentTabId] found the tab, ID=${tabs[0].id}`);
         resolve(tabs[0].id);
       } else {
-        chrome.tabs.query({ windowId, active: true, currentWindow: true }, function (_tabs) {
-          if (_tabs.length > 0) {
-            resolve(_tabs[0].id);
-            return;
-          } else {
-            chrome.tabs.query(
-              { windowId, status: 'complete', currentWindow: true },
-              function (__tabs) {
-                resolve(__tabs.length ? __tabs[__tabs.length - 1].id : undefined);
-              }
-            );
-          }
-        });
+        console.debug(`[getCurrentTabId] cannot find the tab, returns undefined`);
+        resolve(undefined);
       }
     });
   });
 }
 
 export async function open_new_tab(
+  chromeProxy: any,
   url: string,
   newWindow: boolean,
   windowId?: number
 ): Promise<chrome.tabs.Tab> {
   let tabId;
   if (newWindow) {
-    let window = await chrome.windows.create({
+    let window = await chromeProxy.windows.create({
       type: 'normal',
       state: 'maximized',
       url: url,
     } as any as chrome.windows.CreateData);
     windowId = window.id as number;
     let tabs = window.tabs || [
-      await chrome.tabs.create({
+      await chromeProxy.tabs.create({
         url: url,
         windowId: windowId,
       }),
@@ -110,22 +127,22 @@ export async function open_new_tab(
     tabId = tabs[0].id as number;
   } else {
     if (!windowId) {
-      const window = await chrome.windows.getCurrent();
+      const window = await chromeProxy.windows.getCurrent();
       windowId = window.id;
     }
-    let tab = await chrome.tabs.create({
+    let tab = await chromeProxy.tabs.create({
       url: url,
       windowId: windowId,
     });
     tabId = tab.id as number;
   }
-  let tab = await waitForTabComplete(tabId);
+  let tab = await waitForTabComplete(chromeProxy, tabId);
   await sleep(200);
   return tab;
 }
 
-export async function executeScript(tabId: number, func: any, args: any[]): Promise<any> {
-  let frameResults = await chrome.scripting.executeScript({
+export async function executeScript(chromeProxy: any, tabId: number, func: any, args: any[]): Promise<any> {
+  let frameResults = await chromeProxy.scripting.executeScript({
     target: { tabId: tabId as number },
     func: func,
     args: args,
@@ -134,34 +151,35 @@ export async function executeScript(tabId: number, func: any, args: any[]): Prom
 }
 
 export async function waitForTabComplete(
+  chromeProxy: any,
   tabId: number,
   timeout: number = 15_000
 ): Promise<chrome.tabs.Tab> {
   return new Promise(async (resolve, reject) => {
-    let tab = await chrome.tabs.get(tabId);
+    let tab = await chromeProxy.tabs.get(tabId);
     if (tab.status === 'complete') {
       resolve(tab);
       return;
     }
     const time = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
+      chromeProxy.tabs.onUpdated.removeListener(listener);
       reject();
     }, timeout);
     const listener = async (updatedTabId: number, changeInfo: any, tab: chrome.tabs.Tab) => {
       if (updatedTabId === tabId && changeInfo.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
+        chromeProxy.tabs.onUpdated.removeListener(listener);
         clearTimeout(time);
         resolve(tab);
       }
     };
-    chrome.tabs.onUpdated.addListener(listener);
+    chromeProxy.tabs.onUpdated.addListener(listener);
   });
 }
 
-export async function doesTabExists(tabId: number) {
+export async function doesTabExists(chromeProxy: any, tabId: number) {
   const tabExists = await new Promise((resolve) => {
-    chrome.tabs.get(tabId, (tab) => {
-      if (chrome.runtime.lastError) {
+    chromeProxy.tabs.get(tabId, (tab: any) => {
+      if (chromeProxy.runtime.lastError) {
         resolve(false);
       } else {
         resolve(true);
@@ -171,11 +189,11 @@ export async function doesTabExists(tabId: number) {
   return tabExists;
 }
 
-export async function getPageSize(tabId?: number): Promise<[number, number]> {
+export async function getPageSize(chromeProxy: any, tabId?: number): Promise<[number, number]> {
   if (!tabId) {
-    tabId = await getCurrentTabId();
+    tabId = await getCurrentTabId(chromeProxy);
   }
-  let injectionResult = await chrome.scripting.executeScript({
+  let injectionResult = await chromeProxy.scripting.executeScript({
     target: { tabId: tabId as number },
     func: () => [
       window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth,
@@ -189,12 +207,12 @@ export function sleep(time: number): Promise<void> {
   return new Promise((resolve) => setTimeout(() => resolve(), time));
 }
 
-export async function injectScript(tabId: number, filename?: string) {
+export async function injectScript(chromeProxy: any, tabId: number, filename?: string) {
   let files = ['eko/script/common.js'];
   if (filename) {
     files.push('eko/script/' + filename);
   }
-  await chrome.scripting.executeScript({
+  await chromeProxy.scripting.executeScript({
     target: { tabId },
     files: files,
   });

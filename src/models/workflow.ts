@@ -1,6 +1,9 @@
 import { ExecutionLogger, LogOptions } from "@/utils/execution-logger";
-import { Workflow, WorkflowNode, NodeInput, NodeOutput, ExecutionContext, LLMProvider, WorkflowCallback } from "../types";
-import { EkoConfig } from "../types/eko.types";
+import { Workflow, WorkflowNode, NodeInput, ExecutionContext, LLMProvider, WorkflowCallback, WorkflowSummary, Message } from "../types";
+import { EkoConfig, WorkflowResult } from "../types/eko.types";
+import { summarizeWorkflow } from "@/common/summarize-workflow";
+import {ReflexionLLM} from "@/memory/reflexion_llm";
+import {OpenaiProvider} from "@/services/llm/openai-provider";
 
 export class WorkflowImpl implements Workflow {
   abort?: boolean;
@@ -11,6 +14,7 @@ export class WorkflowImpl implements Workflow {
     public id: string,
     public name: string,
     private ekoConfig: EkoConfig,
+    private rawWorkflow: string,
     public description?: string,
     public nodes: WorkflowNode[] = [],
     public variables: Map<string, unknown> = new Map(),
@@ -33,7 +37,7 @@ export class WorkflowImpl implements Workflow {
     }
   }
 
-  async execute(callback?: WorkflowCallback): Promise<NodeOutput[]> {
+  async execute(callback?: WorkflowCallback): Promise<WorkflowResult> {
     if (!this.validateDAG()) {
       throw new Error("Invalid workflow: Contains circular dependencies");
     }
@@ -44,12 +48,12 @@ export class WorkflowImpl implements Workflow {
     const executed = new Set<string>();
     const executing = new Set<string>();
 
-    const executeNode = async (nodeId: string): Promise<void> => {
+    const executeNode = async (nodeId: string): Promise<Message[]> => {
       if (this.abort) {
         throw new Error("Abort");
       }
       if (executed.has(nodeId)) {
-        return;
+        return [];
       }
 
       if (executing.has(nodeId)) {
@@ -102,15 +106,23 @@ export class WorkflowImpl implements Workflow {
       if (context.__abort) {
         throw new Error("Abort");
       } else if (context.__skip) {
-        return;
+        return [];
       }
 
-      node.output.value = await node.action.execute(node.input, node.output, context);
-
+      const action_executing_result = await node.action.execute(node.input, node.output, context);
+      node.output.value = action_executing_result.nodeOutput;
+      
+      const action_reacts = action_executing_result.reacts;
+      console.log("debug `action_reacts`...");
+      console.log(action_reacts);
+      console.log("debug `action_reacts`...done");
+      
       executing.delete(nodeId);
       executed.add(nodeId);
 
       callback && await callback.hooks.afterSubtask?.(node, context, node.output?.value);
+
+      return action_reacts;
     };
 
     // Execute all terminal nodes (nodes with no dependents)
@@ -118,11 +130,38 @@ export class WorkflowImpl implements Workflow {
       !this.nodes.some(n => n.dependencies.includes(node.id))
     );
 
-    await Promise.all(terminalNodes.map(node => executeNode(node.id)));
+    const all_reacts = await Promise.all(terminalNodes.map(node => executeNode(node.id)));
 
     callback && await callback.hooks.afterWorkflow?.(this, this.variables);
 
-    return terminalNodes.map(node => node.output);
+    let node_outputs = terminalNodes.map(node => node.output);
+    
+    let workflowSummary: WorkflowSummary | undefined;
+    if (this.llmProvider) {
+      workflowSummary = await summarizeWorkflow(this.llmProvider, this, this.variables, node_outputs);
+    } else {
+      console.warn("WorkflowImpl.llmProvider is undefined, cannot generate workflow summary");
+    }
+
+
+    if(workflowSummary?.isSuccessful&& this.llmProvider instanceof OpenaiProvider){
+      let llm = new ReflexionLLM(this.llmProvider)
+      await llm.setReflexion(all_reacts,this.name);
+    }
+    
+    // Special context variables
+    console.log("debug special context variables...");
+
+    let workflowPayload = this.variables.get("workflow_transcript") as string | undefined;
+    console.log(workflowPayload);
+    if (!workflowPayload) {
+      workflowPayload = workflowSummary?.payload;
+    }
+    return {
+      isSuccessful: workflowSummary?.isSuccessful,
+      summary: workflowSummary?.summary,
+      payload: workflowPayload,
+    };
   }
 
   addNode(node: WorkflowNode): void {
@@ -187,5 +226,9 @@ export class WorkflowImpl implements Workflow {
     };
 
     return !this.nodes.some(node => hasCycle(node.id));
+  }
+
+  public getRawWorkflowJson(): string {
+    return this.rawWorkflow;
   }
 }

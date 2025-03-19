@@ -19,6 +19,10 @@ export class WorkflowGenerator {
     return this.doGenerateWorkflow(prompt, false, ekoConfig);
   }
 
+  async generateWorkflowFromJson(json: any, ekoConfig: EkoConfig): Promise<Workflow> {
+    return this.createWorkflowFromData(json, ekoConfig);
+  }
+
   async modifyWorkflow(prompt: string, ekoConfig: EkoConfig): Promise<Workflow> {
     return this.doGenerateWorkflow(prompt, true, ekoConfig);
   }
@@ -87,20 +91,11 @@ export class WorkflowGenerator {
 
     const workflowData = response.toolCalls[0].input.workflow as any;
 
-    // Forcibly add special tools
-    const specialTools = [
-      "cancel_workflow",
-      "human_input_text",
-      "human_operate",
-    ]
-    for (const node of workflowData.nodes) {
-      for (const tool of specialTools) {
-        if (!node.action.tools.includes(tool)) {
-          node.action.tools.push(tool);
-        }
-      }
-    }
-
+    // debug
+    console.log("Debug the workflow...")
+    console.log({ ...workflowData});
+    console.log("Debug the workflow...Done")    
+    
     // Validate all tools exist
     for (const node of workflowData.nodes) {
       if (!this.toolRegistry.hasTools(node.action.tools)) {
@@ -113,11 +108,6 @@ export class WorkflowGenerator {
       workflowData.id = uuidv4();
     }
 
-    // debug
-    console.log("Debug the workflow...")
-    console.log(workflowData);
-    console.log("Debug the workflow...Done")    
-    
     return this.createWorkflowFromData(workflowData, ekoConfig);
   }
 
@@ -126,6 +116,7 @@ export class WorkflowGenerator {
       data.id,
       data.name,
       ekoConfig,
+      data,
       data.description || '',
       [],
       new Map(Object.entries(data.variables || {})),
@@ -139,7 +130,13 @@ export class WorkflowGenerator {
     // Add nodes to workflow
     if (Array.isArray(data.nodes)) {
       data.nodes.forEach((nodeData: any) => {
-        const tools = nodeData.action.tools.map((toolName: string) =>
+        const tools = nodeData.action.tools.filter((toolName: string) => {
+          let hasTool = this.toolRegistry.hasTools([toolName]);
+          if (!hasTool) {
+            console.warn(`The [${toolName}] tool does not exist.`);
+          }
+          return hasTool;
+        }).map((toolName: string) =>
           this.toolRegistry.getTool(toolName)
         );
 
