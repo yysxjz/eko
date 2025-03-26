@@ -6,6 +6,7 @@ import { ToolRegistry } from '../../core/tool-registry';
 import { createWorkflowPrompts, createWorkflowGenerationTool } from './templates';
 import { v4 as uuidv4 } from 'uuid';
 import { EkoConfig } from '@/types';
+import { GeneratorLLM } from '@/services/workflow/generator-llm';
 
 export class WorkflowGenerator {
   message_history: Message[] = [];
@@ -57,8 +58,15 @@ export class WorkflowGenerator {
       tools: [createWorkflowGenerationTool(this.toolRegistry)],
       toolChoice: { type: 'tool', name: 'generate_workflow' },
     };
+    //生成工作流的小模型
+    const generatorLLM = new GeneratorLLM(this.llmProvider);
+    console.time('Workflow Generation Time'); // 开始计时
+    const response = await generatorLLM.generateText(messages, params);
+    console.timeEnd('Workflow Generation Time'); // 结束计时并输出时间差
 
-    const response = await this.llmProvider.generateText(messages, params);
+    // console.time('Workflow Generation Time'); // 开始计时
+    // const response = await this.llmProvider.generateText(messages, params);
+    // console.timeEnd('Workflow Generation Time'); // 结束计时并输出时间差
 
     if (!response.toolCalls.length || !response.toolCalls[0].input.workflow) {
       messages.pop();
