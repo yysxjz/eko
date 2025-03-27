@@ -339,10 +339,14 @@ export class ActionImpl implements Action {
     context.tools?.forEach((tool) => toolMap.set(tool.name, tool));
     toolMap.set(returnTool.name, returnTool);
 
+    // get already existing tabs as task background
+    const currentWindow = await context.ekoConfig.chromeProxy.windows.getCurrent();
+    const existingTabs: chrome.tabs.Tab[] = await context.ekoConfig.chromeProxy.tabs.query({ windowId: currentWindow.id });
+
     // Prepare initial messages
     const messages: Message[] = [
       { role: 'system', content: this.formatSystemPrompt() },
-      { role: 'user', content: this.formatUserPrompt(this.name, this.description, this.tabs) },
+      { role: 'user', content: this.formatUserPrompt(this.name, this.description, this.tabs, existingTabs) },
     ];
 
     this.logger.logActionStart(this.name, input, context);
@@ -492,6 +496,11 @@ export class ActionImpl implements Action {
 - Before you return output, reflect on whether the output provided *is what users need* and *whether it is too concise*
 - If you find the what user want, click the URL and show it on the current page.
 
+## TIME:
+- The current time is ${formattedTime}.
+- If the user has specified a particular time requirement, please complete the task according to the user's specified time frame.
+- If the user has given a vague time requirement, such as “recent one year,” then please determine the time range based on the current time first, and then complete the task.
+
 ## NAVIGATION & ERROR HANDLING:
 - If no suitable elements exist, use other functions to complete the task
 - If stuck, try alternative approaches - like going back to a previous page, new search, new tab etc.
@@ -531,11 +540,19 @@ export class ActionImpl implements Action {
 `;
   }
 
-  private formatUserPrompt(name: string, description: string, tabs: chrome.tabs.Tab[]): string { // include title & URL
+  private formatUserPrompt(
+    name: string,
+    description: string,
+    mentionedTabs: chrome.tabs.Tab[],
+    existingTabs: chrome.tabs.Tab[],
+  ): string {
     let  prompt = `${name} -- ${description}`;
     prompt = `Your ultimate task is: """${prompt}""". If you achieved your ultimate task, stop everything and use the done action in the next step to complete the task. If not, continue as usual.`;
-    if (tabs.length > 0) {
-      prompt += "\n\nYou should complete the task with the following tabs firstly: " + tabs.map((tab) => `- TabID=${tab.id}: ${tab.title} (${tab.url})`).join('\n');
+    if (existingTabs.length > 0) {
+      prompt += "\n\nYou should complete the task with the following tabs:\n" + existingTabs.map((tab) => `- TabID=${tab.id}: ${tab.title} (${tab.url})`).join('\n');
+    }
+    if (mentionedTabs.length > 0) {
+      prompt += "\n\nYou should consider the following tabs firstly:\n" + mentionedTabs.map((tab) => `- TabID=${tab.id}: ${tab.title} (${tab.url})`).join('\n');
     }
     return prompt;
   }
