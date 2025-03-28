@@ -106,6 +106,10 @@ export class Eko {
 
   public async execute(workflow: Workflow): Promise<WorkflowResult> {
     let prompt = this.prompt;
+    let description ="";
+    workflow.nodes.forEach(node => {
+      description += node.name + "\n";
+    })
     const json = {
       "id": "workflow_id",
       "name": prompt,
@@ -117,7 +121,7 @@ export class Eko {
           "action": {
             "type": "prompt",
             "name": prompt,
-            "description": prompt,
+            "description": description,
             "tools": [
               "browser_use",
               "cancel_workflow",
@@ -126,7 +130,6 @@ export class Eko {
               "extract_content",
               "get_all_tabs",
               "open_url",
-              "screenshot",
               "tab_management",
               "web_search",
               "human_input_text",

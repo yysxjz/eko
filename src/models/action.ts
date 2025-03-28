@@ -126,7 +126,6 @@ export class ActionImpl implements Action {
           content: [
             {
               type: 'tool_use',
-              id: toolCall.id,
               name: tool.name,
               input: toolCall.input,
             },
@@ -154,7 +153,6 @@ export class ActionImpl implements Action {
                 content: [
                   {
                     type: 'tool_result',
-                    tool_use_id: toolCall.id,
                     content: 'skip',
                   },
                 ],
@@ -180,7 +178,6 @@ export class ActionImpl implements Action {
               result_has_image
                 ? {
                     type: 'tool_result',
-                    tool_use_id: toolCall.id,
                     content: result.text
                       ? [
                           { type: 'image', source: result.image },
@@ -190,7 +187,6 @@ export class ActionImpl implements Action {
                   }
                 : {
                     type: 'tool_result',
-                    tool_use_id: toolCall.id,
                     content: [{ type: 'text', text: JSON.stringify(result) }],
                   };
             const resultContentText =
@@ -218,7 +214,6 @@ export class ActionImpl implements Action {
               content: [
                 {
                   type: 'tool_result',
-                  tool_use_id: toolCall.id,
                   content: [{ type: 'text', text: `Error: ${errorMessage}` }],
                   is_error: true,
                 },
@@ -546,7 +541,7 @@ export class ActionImpl implements Action {
     mentionedTabs: chrome.tabs.Tab[],
     existingTabs: chrome.tabs.Tab[],
   ): string {
-    let  prompt = `${name} -- ${description}`;
+    let  prompt = `${name} -- The steps you can follow are ${description}`;
     prompt = `Your ultimate task is: """${prompt}""". If you achieved your ultimate task, stop everything and use the done action in the next step to complete the task. If not, continue as usual.`;
     if (existingTabs.length > 0) {
       prompt += "\n\nYou should complete the task with the following tabs:\n" + existingTabs.map((tab) => `- TabID=${tab.id}: ${tab.title} (${tab.url})`).join('\n');
