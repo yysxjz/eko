@@ -124,11 +124,9 @@ export class Eko {
             "description": description,
             "tools": [
               "browser_use",
-              "cancel_workflow",
               "document_agent",
               "export_file",
               "extract_content",
-              "get_all_tabs",
               "open_url",
               "tab_management",
               "web_search",
