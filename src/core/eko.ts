@@ -76,7 +76,7 @@ export class Eko {
     } else {
       console.warn("`ekoConfig.callback` is missing when construct `Eko` instance.")
     }
-    
+
     tools.forEach(tool => this.toolRegistry.registerTool(tool));
   }
 
@@ -129,6 +129,7 @@ export class Eko {
               "extract_content",
               "open_url",
               "tab_management",
+              "switch_tab",
               "web_search",
               "human_input_text",
               "human_input_single_choice",
@@ -143,12 +144,12 @@ export class Eko {
     console.log("debug the workflow...");
     console.log(json);
     console.log("debug the workflow...done");
-    
+
     console.log("debug the LLMProvider...");
     console.log(this.llmProvider);
     console.log("debug the LLMProvider...done");
-    
-    const generator = new WorkflowGenerator(this.llmProvider, this.toolRegistry);  
+
+    const generator = new WorkflowGenerator(this.llmProvider, this.toolRegistry);
     workflow = await generator.generateWorkflowFromJson(json, this.ekoConfig);
     this.workflow = workflow;
 
