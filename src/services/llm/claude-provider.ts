@@ -7,6 +7,7 @@ import {
   LLMStreamHandler,
   ToolCall,
 } from '../../types/llm.types';
+import { logger } from '@/common/log';
 
 interface PartialToolUse {
   id: string;
@@ -15,8 +16,8 @@ interface PartialToolUse {
 }
 
 export class ClaudeProvider implements LLMProvider {
-  private client: Anthropic;
-  private defaultModel = 'claude-3-5-sonnet-20241022';
+  client: Anthropic;
+  defaultModel = 'claude-3-5-sonnet-20241022';
 
   constructor(options: Anthropic, defaultModel?: string);
   constructor(options: ClientOptions, defaultModel?: string);
@@ -35,7 +36,7 @@ export class ClaudeProvider implements LLMProvider {
       typeof document !== 'undefined' &&
       (typeof param == 'string' || param.apiKey)
     ) {
-      console.warn(`
+      logger.warn(`
         ⚠️ Security Warning:
         DO NOT use API Keys in browser/frontend code!
         This will expose your credentials and may lead to unauthorized usage.

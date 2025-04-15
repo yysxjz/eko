@@ -2,16 +2,19 @@ import { BrowserUseParam, BrowserUseResult } from '../../types/tools.types';
 import { Tool, InputSchema, ExecutionContext } from '../../types/action.types';
 import { getWindowId, getTabId, sleep, injectScript, executeScript } from '../utils';
 import * as browser from './browser';
+import { ToolReturnsScreenshot } from './tool_returns_screenshot';
+import { logger } from '@/common/log';
 
 /**
  * Browser Use for general
  */
-export class BrowserUse implements Tool<BrowserUseParam, BrowserUseResult> {
+export class BrowserUse extends ToolReturnsScreenshot<BrowserUseParam> {
   name: string;
   description: string;
   input_schema: InputSchema;
 
   constructor() {
+    super();
     this.name = 'browser_use';
     this.description = `Use structured commands to interact with the browser, manipulating page elements through screenshots and webpage element extraction.
 * This is a browser GUI interface where you need to analyze webpages by taking screenshots and extracting page element structures, and specify action sequences to complete designated tasks.
@@ -76,22 +79,22 @@ export class BrowserUse implements Tool<BrowserUseParam, BrowserUseResult> {
    * @param {*} params { action: 'input_text', index: 1, text: 'string' }
    * @returns > { success: true, image?: { type: 'base64', media_type: 'image/jpeg', data: '/9j...' }, text?: string }
    */
-  async execute(context: ExecutionContext, params: BrowserUseParam): Promise<BrowserUseResult> {
-    console.log("execute 'browser_use'...");
+  async realExecute(context: ExecutionContext, params: BrowserUseParam): Promise<BrowserUseResult> {
+    logger.debug("debug 'browser_use'...");
+    logger.debug(params);
     try {
       if (params === null || !params.action) {
         throw new Error('Invalid parameters. Expected an object with a "action" property.');
       }
       let tabId: number;
       try {
-        console.log("getTabId(context)...");
         tabId = await getTabId(context);
-        console.log("getTabId(context)...done");
+        logger.debug(tabId);
         if (!tabId || !Number.isInteger(tabId)) {
           throw new Error('Could not get valid tab ID');
         }
       } catch (e) {
-        console.error('Tab ID error:', e);
+        logger.error('Tab ID error:', e);
         return { success: false, error: 'Could not access browser tab' };
       }
       let windowId = await getWindowId(context);
@@ -104,7 +107,7 @@ export class BrowserUse implements Tool<BrowserUseParam, BrowserUseResult> {
         }
       }
       let result;
-      console.log("switch cases...");
+      logger.debug("switch cases...");
       switch (params.action) {
         case 'input_text':
           if (params.index == null) {
@@ -180,44 +183,37 @@ export class BrowserUse implements Tool<BrowserUseParam, BrowserUseResult> {
           );
           break;
         case 'screenshot_extract_element':
-          console.log("execute 'screenshot_extract_element'...");
+          logger.debug("execute 'screenshot_extract_element'...");
           await sleep(100);
-          console.log("injectScript...");
+          logger.debug("injectScript...");
           await injectScript(context.ekoConfig.chromeProxy, tabId, 'build_dom_tree.js');
           await sleep(100);
           try {
-            console.log("executeScript...");
+            logger.debug("executeScript...");
             let element_result = await executeScript(context.ekoConfig.chromeProxy, tabId, () => {
               return (window as any).get_clickable_elements(true);
             }, []);
             context.selector_map = element_result.selector_map;
-            console.log("browser.screenshot...");
+            logger.debug("browser.screenshot...");
             let screenshot = await browser.screenshot(context.ekoConfig.chromeProxy, windowId, true);
             result = { image: screenshot.image, text: element_result.element_str };
           } finally {
-            console.log("executeScript #2...");
+            logger.debug("executeScript #2...");
             await executeScript(context.ekoConfig.chromeProxy, tabId, () => {
               return (window as any).remove_highlight();
             }, []);
           }
-          console.log("execute 'screenshot_extract_element'...done");
+          logger.debug("execute 'screenshot_extract_element'...done");
           break;
         default:
           throw Error(
             `Invalid parameters. The "${params.action}" value is not included in the "action" enumeration.`
           );
       }
-      console.log("execute 'browser_use'...done, result=");
-      console.log(result);
-      if (params.action != "screenshot_extract_element") {
-        console.log("as this action is has not screenshoted, take it now...");
-        let instance = new BrowserUse();
-        result = await instance.execute(context, { action: "screenshot_extract_element" });
-        console.log("as this action is has not screenshoted, take it now...done");
-      }
+      logger.debug(`execute 'browser_use'...done, result=${result}`);
       return result
     } catch (e: any) {
-      console.error('Browser use error:', e);
+      logger.error('Browser use error:', e);
       return { success: false, error: e?.message };
     }
   }

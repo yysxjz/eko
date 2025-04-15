@@ -1,6 +1,6 @@
 // src/models/action.ts
 
-import { Action, Tool, ExecutionContext, InputSchema, Property } from '../types/action.types';
+import { Action, Tool, ExecutionContext, InputSchema, Property, PatchItem } from '../types/action.types';
 import { NodeInput, NodeOutput } from '../types/workflow.types';
 import {
   LLMProvider,
@@ -13,6 +13,7 @@ import {
 } from '../types/llm.types';
 import { ExecutionLogger } from '@/utils/execution-logger';
 import { WriteContextTool } from '@/common/tools/write_context';
+import { logger } from '@/common/log';
 
 function createReturnTool(
   actionName: string,
@@ -44,14 +45,12 @@ function createReturnTool(
             'The output value. Only provide a value if the previous tool result is not suitable for the output description. Otherwise, leave this as null.',
         },
       } as unknown,
-      required: ['use_tool_result', 'value'],
+      required: ['isSuccessful', 'use_tool_result', 'value'],
     } as InputSchema,
 
     async execute(context: ExecutionContext, params: unknown): Promise<unknown> {
       context.variables.set(`__action_${actionName}_output`, params);
-      console.info('debug the output...');
-      console.log(params);
-      console.info('debug the output...done');
+      console.debug('debug the output...', params);
       context.variables.set("__isSuccessful__", (params as any).isSuccessful as boolean);
       return { success: true };
     },
@@ -99,7 +98,6 @@ export class ActionImpl implements Action {
     params_copy.tools = params_copy.tools?.map(this.wrapToolInputSchema);
 
     while (!context.signal?.aborted) {
-      this.logger = context.logger;
       roundMessages = [];
       hasToolUse = false;
       response = null;
@@ -126,8 +124,13 @@ export class ActionImpl implements Action {
           }
         },
         onToolUse: async (toolCall) => {
-          this.logger.log('info', `Assistant: ${assistantTextMessage}`);
-          this.logger.logToolExecution(toolCall.name, toolCall.input, context);
+          logger.info("toolCall start", {
+            assistant: assistantTextMessage,
+            toolCall: {
+              name: toolCall.name,
+              input: toolCall.input,
+            },
+          })
           hasToolUse = true;
 
           const tool = toolMap.get(toolCall.name);
@@ -200,11 +203,16 @@ export class ActionImpl implements Action {
               // unwrap the toolCall
               let unwrapped = this.unwrapToolCall(toolCall);
               let input = unwrapped.toolCall.input;
-              console.log("unwrapped", unwrapped);
-              if (unwrapped.userSidePrompt) {
-                context.callback?.hooks.onLlmMessageUserSidePrompt?.(unwrapped.userSidePrompt);
+              logger.debug("unwrapped", unwrapped);
+              if (unwrapped.thinking) {
+                context.callback?.hooks.onLlmMessage?.(unwrapped.thinking);
               } else {
-                console.warn("LLM returns without `userSidePrompt`");
+                logger.warn("LLM returns without `userSidePrompt`");
+              }
+              if (unwrapped.userSidePrompt) {
+                context.callback?.hooks.onLlmMessageUserSidePrompt?.(unwrapped.userSidePrompt, toolCall.name);
+              } else {
+                logger.warn("LLM returns without `userSidePrompt`");
               }
 
               // Execute the tool
@@ -248,14 +256,28 @@ export class ActionImpl implements Action {
                 content: [resultContent],
               };
               toolResultMessage = resultMessage;
-              this.logger.logToolResult(tool.name, result, context);
+              const truncate = (x: any) => {
+                const s = JSON.stringify(x);
+                const maxLength = 1000;
+                if (s.length < maxLength) {
+                  return x;
+                } else {
+                  return s.slice(0, maxLength) + "...(truncated)";
+                }
+              };
+              logger.info("toolCall done", { // TODO: remove image base64
+                toolCall: {
+                  name: tool.name,
+                  result: truncate(result),
+                },
+              });
               // Store tool results except for the return_output tool
               if (tool.name !== 'return_output') {
                 this.toolResults.set(toolCall.id, resultContentText);
               }
             } catch (err) {
-              console.log('An error occurred when calling tool:');
-              console.log(err);
+              logger.error('An error occurred when calling tool:');
+              logger.error(err);
               const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
               const errorResult: Message = {
                 role: 'user',
@@ -269,7 +291,6 @@ export class ActionImpl implements Action {
                 ],
               };
               toolResultMessage = errorResult;
-              this.logger.logError(err as Error, context);
             }
           })();
         },
@@ -277,8 +298,8 @@ export class ActionImpl implements Action {
           response = llmResponse;
         },
         onError: (error) => {
-          // console.error('Stream Error:', error);
-          // console.log('Last message array sent to LLM:', JSON.stringify(messages, null, 2));
+          logger.error('Stream Error:', error);
+          logger.debug('Last message array sent to LLM:', JSON.stringify(messages, null, 2));
           throw error;
         },
       };
@@ -292,8 +313,7 @@ export class ActionImpl implements Action {
       try {
         await this.llmProvider.generateStream(messages, params_copy, handler);
       } catch (e) {
-        console.warn("an error occurs when LLM generate response");
-        console.warn(e);
+        logger.warn("an error occurs when LLM generate response, retry...", e);
         continue;
       }
 
@@ -356,7 +376,7 @@ export class ActionImpl implements Action {
 
     const finalImageCount = this.countImages(messages);
     if (initialImageCount !== finalImageCount) {
-      this.logger.log('info', `Removed ${initialImageCount - finalImageCount} images from history`);
+      logger.debug(`Removed ${initialImageCount - finalImageCount} images from history`);
     }
   }
 
@@ -380,8 +400,7 @@ export class ActionImpl implements Action {
     context: ExecutionContext,
     outputSchema?: unknown
   ): Promise<{ nodeOutput: unknown; reacts: Message[] }> {
-    this.logger = context.logger;
-    console.log(`Executing action started: ${this.name}`);
+    logger.debug(`Executing action started: ${this.name}`);
     // Create return tool with output schema
     const returnTool = createReturnTool(this.name, output.description, outputSchema);
 
@@ -397,16 +416,27 @@ export class ActionImpl implements Action {
       windowId: currentWindow.id,
     });
 
+    // get patchs for task
+    let patchs: PatchItem[] = [];
+    if (context.ekoConfig.patchServerUrl) {
+      patchs = await this.getPatchs(this.name, context.ekoConfig.patchServerUrl);
+    }
+
     // Prepare initial messages
     const messages: Message[] = [
       { role: 'system', content: this.formatSystemPrompt() },
       {
         role: 'user',
-        content: this.formatUserPrompt(this.name, this.description, this.tabs, existingTabs),
+        content: this.formatUserPrompt(this.name, this.description, this.tabs, existingTabs, patchs),
       },
     ];
 
-    this.logger.logActionStart(this.name, input, context);
+    logger.info("action start", {
+      action: {
+        name: this.name,
+        input,
+      },
+    });
 
     // Configure tool parameters
     const params: LLMParameters = {
@@ -428,7 +458,7 @@ export class ActionImpl implements Action {
       }
 
       roundCount++;
-      this.logger.log('info', `Starting round ${roundCount} of ${this.maxRounds}`, context);
+      logger.info(`Starting round ${roundCount} of ${this.maxRounds}`);
 
       const { response, hasToolUse, roundMessages } = await this.executeSingleRound(
         messages,
@@ -437,28 +467,16 @@ export class ActionImpl implements Action {
         context
       );
 
-      if (response?.textContent) {
-        context.callback?.hooks?.onLlmMessage?.(response.textContent);
-      }
-
       lastResponse = response;
 
       // Add round messages to conversation history
       messages.push(...roundMessages);
-      this.logger.log(
-        'debug',
-        `Round ${roundCount} messages: ${JSON.stringify(roundMessages)}`,
-        context
-      );
-
+      
       // Check termination conditions
       if (!hasToolUse && response) {
         // LLM sent a message without using tools - request explicit return
-        this.logger.log('info', `Assistant: ${response.textContent}`);
-        this.logger.log(
-          'warn',
-          'LLM sent a message without using tools; requesting explicit return'
-        );
+        logger.info(`Assistant: ${response.textContent}`);
+        logger.warn('LLM sent a message without using tools; requesting explicit return');
         const returnOnlyParams = {
           ...params,
           tools: [
@@ -492,7 +510,7 @@ export class ActionImpl implements Action {
 
       // If this is the last round, force an explicit return
       if (roundCount === this.maxRounds) {
-        this.logger.log('warn', 'Max rounds reached, requesting explicit return');
+        logger.warn('Max rounds reached, requesting explicit return');
         const returnOnlyParams = {
           ...params,
           tools: [
@@ -524,7 +542,7 @@ export class ActionImpl implements Action {
     const outputKey = `__action_${this.name}_output`;
     const outputParams = context.variables.get(outputKey) as any;
     if (!outputParams) {
-      console.warn('outputParams is `undefined`, action return `{}`');
+      logger.warn('outputParams is `undefined`, action return `{}`');
       return { nodeOutput: {}, reacts: messages };
     }
     context.variables.delete(outputKey);
@@ -535,7 +553,7 @@ export class ActionImpl implements Action {
       : outputParams?.value;
 
     if (outputValue === undefined) {
-      console.warn('Action completed without returning a value');
+      logger.warn('Action completed without returning a value');
       return { nodeOutput: {}, reacts: messages };
     }
 
@@ -545,7 +563,7 @@ export class ActionImpl implements Action {
   private formatSystemPrompt(): string {
     const now = new Date();
     const formattedTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-    console.log('Now is ' + formattedTime);
+    logger.debug('Now is ' + formattedTime);
     return `You are an AI agent designed to automate browser tasks. Your goal is to accomplish the ultimate task following the rules. Now is ${formattedTime}.
 
 ## GENERIC:
@@ -627,7 +645,8 @@ Navigation Bar or Menu Changes: After logging in, the navigation bar will includ
     name: string,
     description: string,
     mentionedTabs: chrome.tabs.Tab[],
-    existingTabs: chrome.tabs.Tab[]
+    existingTabs: chrome.tabs.Tab[],
+    patchItems: PatchItem[],
   ): string {
     let prompt = `${name} -- The steps you can follow are ${description}`;
 
@@ -642,7 +661,46 @@ Navigation Bar or Menu Changes: After logging in, the navigation bar will includ
         '\n\nYou should consider the following tabs firstly:\n' +
         mentionedTabs.map((tab) => `- TabID=${tab.id}: ${tab.title} (${tab.url})`).join('\n');
     }
+    if (patchItems.length > 0) {
+      prompt +=
+        '\n\You can refer to the following cases and tips:\n' +
+        patchItems.map((item) => `<task>${item.task}</task><tips>${item.patch}</tips>`).join('\n');
+    }
     return prompt;
+  }
+
+  private async getPatchs(task: string, patchServerUrl: string): Promise<PatchItem[]> {
+    const form = {
+      task,
+      top_k: 3,
+    };
+
+    try {
+      const response = await fetch(`${patchServerUrl}/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(form),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data: {
+        entry: {
+          id: number;
+          task: string;
+          patch: string;
+        };
+        score: number;
+      }[] = await response.json();
+      return data.map((entryWithScore) => entryWithScore.entry);
+    } catch (error) {
+      logger.error('Failed to fetch patches:', error);
+      return [];
+    }
   }
 
   // Static factory method
@@ -665,20 +723,20 @@ Navigation Bar or Menu Changes: After logging in, the navigation bar will includ
         //   "type": "string",
         //   "description": 'Your observation of the previous steps. Should start with "In the previous step, I\'ve ...".',
         // },
-        // thinking: {
-        //   "type": "string",
-        //   "description": 'Your thinking draft. Should start with "As observation before, now I should ...".',
-        // },
+        thinking: {
+          "type": "string",
+          "description": 'Your thinking draft.',
+        },
         userSidePrompt: {
           "type": "string",
-          "description": 'The user-side prompt, showing why calling this tool. Should start with "I\'m calling the ...(tool) to ...(target)". Rememeber to keep the same language of the ultimate task.',
+          "description": 'The user-side prompt, showing what you are doing. e.g. "Openning x.com." or "Writing the post."',
         },
         toolCall: (definition.input_schema as Property),
       },
       required: [
         // comment for backup
         // "observation",
-        // "thinking",
+        "thinking",
         "userSidePrompt",
         "toolCall",
       ],

@@ -12,6 +12,8 @@ import {
   WorkflowResult,
 } from '../types';
 import { ToolRegistry } from './tool-registry';
+import { logger } from '../common/log';
+import { ILogObj, Logger } from 'tslog';
 
 /**
  * Eko core
@@ -28,21 +30,25 @@ export class Eko {
   public workflow?: Workflow = undefined;
 
   constructor(llmConfig: LLMConfig, ekoConfig?: EkoConfig) {
-    console.info('using Eko@' + process.env.COMMIT_HASH);
-    console.warn('this version is POC, should not used for production');
     this.llmProvider = LLMProviderFactory.buildLLMProvider(llmConfig);
     this.ekoConfig = this.buildEkoConfig(ekoConfig);
     this.registerTools();
+    logger.info("using Eko@" + process.env.COMMIT_HASH);
+  }
+
+  public static getLogger(): Logger<ILogObj> {
+    return logger;
   }
 
   private buildEkoConfig(ekoConfig: Partial<EkoConfig> | undefined): EkoConfig {
     if (!ekoConfig) {
-      console.warn('`ekoConfig` is missing when construct `Eko` instance');
+      logger.warn("`ekoConfig` is missing when construct `Eko` instance");
     }
     const defaultEkoConfig: EkoConfig = {
       workingWindowId: undefined,
       chromeProxy: typeof chrome === 'undefined' ? undefined : chrome,
       callback: undefined,
+      patchServerUrl: "http://127.0.0.1:8000/eko",
     };
     return {
       ...defaultEkoConfig,
@@ -74,12 +80,13 @@ export class Eko {
         }
       });
     } else {
-      console.warn('`ekoConfig.callback` is missing when construct `Eko` instance.');
+      logger.warn("`ekoConfig.callback` is missing when construct `Eko` instance.")
     }
     tools.forEach(tool => this.toolRegistry.registerTool(tool));
   }
 
   public async generate(prompt: string, tabs: chrome.tabs.Tab[] = [], param?: EkoInvokeParam): Promise<Workflow> {
+    logger.info("workflow generating...");
     this.prompt = prompt;
     this.tabs = tabs;
     let toolRegistry = this.toolRegistry;
@@ -97,13 +104,13 @@ export class Eko {
     const generator = new WorkflowGenerator(this.llmProvider, toolRegistry);
     const workflow = await generator.generateWorkflow(prompt, this.ekoConfig);
     this.workflowGeneratorMap.set(workflow, generator);
-    console.log('the workflow returned by generate');
-    console.log(workflow);
     this.workflow = workflow;
+    logger.info("workflow generating...done");
     return workflow;
   }
 
   public async execute(workflow: Workflow): Promise<WorkflowResult> {
+    logger.info("workflow executing...");
     let prompt = this.prompt;
     let description = '';
     workflow.nodes.forEach(node => {
@@ -140,13 +147,12 @@ export class Eko {
         },
       ],
     };
-    console.log('debug the workflow...');
-    console.log(json);
-    console.log('debug the workflow...done');
-
-    console.log('debug the LLMProvider...');
-    console.log(this.llmProvider);
-    console.log('debug the LLMProvider...done');
+    logger.debug("workflow", json);    
+    logger.debug("LLMProvider", {
+      client: (typeof this.llmProvider.client),
+      defaultModel: this.llmProvider.defaultModel,
+    });
+    
     const generator = new WorkflowGenerator(this.llmProvider, this.toolRegistry);
     workflow = await generator.generateWorkflowFromJson(json, this.ekoConfig);
     this.workflow = workflow;
@@ -171,7 +177,8 @@ export class Eko {
     }
 
     const result = await workflow.execute(this.ekoConfig.callback);
-    console.log(result);
+    logger.debug(result);
+    logger.info("workflow executing...done");
     return result;
   }
 
