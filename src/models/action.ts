@@ -314,17 +314,17 @@ export class ActionImpl implements Action {
         throw new Error('LLM provider not set');
       }
       try {
-        let compressedMessages;
+        let compressedMessages: Message[];
         try {
           //const compressor: ContextCompressor = new SimpleQACompress();
           const compressor: ContextCompressor = new SummaryCompress(this.llmProvider,params_copy);
           logger.debug("uncompressed messages:", messages);
-          compressedMessages = compressor.compress(messages);
+          compressedMessages = await compressor.compress(messages);
         } catch(e) {
           logger.error("an error occurs when compress context, use NoCompress");
           logger.error(e);
           const compressor: ContextCompressor = new NoCompress();
-          compressedMessages = compressor.compress(messages);
+          compressedMessages = await compressor.compress(messages);
         }
         logger.debug("compressed messages:", compressedMessages);
         await sleep(5000);
@@ -333,7 +333,7 @@ export class ActionImpl implements Action {
         } catch(e) {
           logger.warn("LLM API raise an error, try to use NoCompress");
           const compressor: ContextCompressor = new NoCompress();
-          compressedMessages = compressor.compress(messages);
+          compressedMessages = await compressor.compress(messages);
           logger.debug("compressed messages:", compressedMessages);
           await sleep(5000);
           await this.llmProvider.generateStream(compressedMessages, params_copy, handler);
