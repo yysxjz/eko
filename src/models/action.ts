@@ -14,7 +14,7 @@ import {
 import { ExecutionLogger } from '@/utils/execution-logger';
 import { WriteContextTool } from '@/common/tools/write_context';
 import { logger } from '@/common/log';
-import { ContextComporessor, NoComporess, SimpleQAComporess } from '@/common/context-compressor';
+import { ContextComporessor, NoComporess, SimpleQAComporess, SummaryComporess } from '@/common/context-compressor';
 import { sleep } from '@/utils/sleep';
 
 function createReturnTool(
@@ -316,7 +316,8 @@ export class ActionImpl implements Action {
       try {
         let compressedMessages;
         try {
-          const comporessor: ContextComporessor = new SimpleQAComporess();
+          //const comporessor: ContextComporessor = new SimpleQAComporess();
+          const comporessor: ContextComporessor = new SummaryComporess(this.llmProvider,params_copy);
           logger.debug("uncompressed messages:", messages);
           compressedMessages = comporessor.comporess(messages);
         } catch(e) {
