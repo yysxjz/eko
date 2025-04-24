@@ -97,11 +97,9 @@ export class SummaryComporess extends ContextComporessor {
 
   1. **Agent Action**:
      - Precisely describe what the agent did (e.g., "Clicked on the 'Blog' link", "Called API to fetch content", "Scraped page data").
-     - Include all parameters, target elements, or methods involved.
 
   2. **Action Result (Mandatory, Unmodified)**:
      - Immediately follow the agent action with its exact, unaltered output.
-     - Record all returned data, responses, HTML snippets, JSON content, or error messages exactly as received. This is critical for constructing the final output later.
 
   3. **Embedded Metadata**:
      For the same numbered step, include additional context such as:
@@ -111,14 +109,10 @@ export class SummaryComporess extends ContextComporessor {
      - **Current Context**: Describe the state after the action (e.g., "Agent is on the blog detail page" or "JSON data stored for further processing") and what the agent plans to do next.
 
 ### Guidelines:
-1. **Preserve Every Output**: The exact output of each agent action is essential. Do not paraphrase or summarize the output. It must be stored as is for later use.
+1. **Summarize Every Output**: summarize the Agent Action use one sentence.
 2. **Chronological Order**: Number the agent actions sequentially in the order they occurred. Each numbered step is a complete record of that action.
-3. **Detail and Precision**:
-   - Use exact data: Include URLs, element indexes, error messages, JSON responses, and any other concrete values.
-   - Preserve numeric counts and metrics (e.g., "3 out of 5 items processed").
-   - For any errors, include the full error message and, if applicable, the stack trace or cause.
-4. **If you find the history summary in messages, you should repeat it first.
-5. **Output Only the Summary**: The final output must consist solely of the structured summary with no additional commentary or preamble.
+3. **If you find the history summary in messages, you should repeat it first.
+4. **Output Only the Summary**: The final output must consist solely of the structured summary with no additional commentary or preamble.
 
 ### Example Template:
 
@@ -144,7 +138,7 @@ export class SummaryComporess extends ContextComporessor {
 
 3. **Agent Action**: Extracted the first 5 blog post links from the blog listing page.  
    **Action Result**:  
-      "[ '/blog/chatgpt-updates', '/blog/ai-and-education', '/blog/openai-api-announcement', '/blog/gpt-4-release', '/blog/safety-and-alignment' ]"  
+      "Find 5 blogs in the page."  
    **Key Findings**: Identified 5 valid blog post URLs.  
    **Current Context**: URLs stored in memory for further processing.
 
@@ -156,7 +150,7 @@ export class SummaryComporess extends ContextComporessor {
 
 5. **Agent Action**: Extracted blog title and full article content from "https://openai.com/blog/chatgpt-updates"  
    **Action Result**:  
-      "{ 'title': 'ChatGPT Updates – March 2025', 'content': 'We\\'re introducing new updates to ChatGPT, including improved browsing capabilities and memory recall... (full content)' }"  
+      "{ 'title': 'ChatGPT Updates – March 2025', 'content': 'We\\'re introducing new updates to ChatGPT, including improved browsing capabilities and memory recall...(Do not output more)' }"  
    **Key Findings**: Full content captured for later summarization.  
    **Current Context**: Data stored; ready to proceed to next blog post.
 
@@ -173,7 +167,7 @@ export class SummaryComporess extends ContextComporessor {
   public comporess(messages: Message[]): Message[] {
     logger.debug('ContextComporessor = SummaryComporess');
     messages = JSON.parse(JSON.stringify(messages));
-    if (messages.length <= 10) {
+    if (messages.length <= 5) {
       return messages;
     } else {
       let comporessMessages: Message[] = [];
