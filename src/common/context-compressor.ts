@@ -2,20 +2,20 @@ import { LLMParameters, LLMProvider, Message, ToolCall } from '@/types';
 import { logger } from './log';
 
 export abstract class ContextComporessor {
-  public abstract comporess(messages: Message[]): Message[];
+  public abstract comporess(messages: Message[]): Promise<Message[]>;
 }
 
 export class NoComporess extends ContextComporessor {
-  public comporess(messages: Message[]): Message[] {
+  public async comporess(messages: Message[]): Promise<Message[]> {
     logger.debug('ContextComporessor = NoComporess');
     let comporessed = JSON.parse(JSON.stringify(messages));
     logger.debug('comporessed:', comporessed);
-    return comporessed;
+    return Promise.resolve(comporessed);
   }
 }
 
 export class SimpleQAComporess extends ContextComporessor {
-  public comporess(messages: Message[]): Message[] {
+  public async comporess(messages: Message[]): Promise<Message[]> {
     logger.debug('ContextComporessor = SimpleQAComporess');
     messages = JSON.parse(JSON.stringify(messages));
     let comporessed: Message[] = [];
@@ -68,7 +68,7 @@ export class SimpleQAComporess extends ContextComporessor {
       } else {
       }
     });
-    return comporessed;
+    return Promise.resolve(comporessed);
   }
 }
 
@@ -170,31 +170,33 @@ export class SummaryComporess extends ContextComporessor {
     };
   }
 
-  public comporess(messages: Message[]): Message[] {
-    logger.debug('ContextComporessor = SummaryComporess');
+  public async compress(messages: Message[]): Promise<Message[]> {
+    logger.debug('ContextCompressor = SummaryCompressor');
     messages = JSON.parse(JSON.stringify(messages));
     if (messages.length <= 10) {
       return messages;
     } else {
-      let comporessMessages: Message[] = [];
-      //保存System messages
-      comporessMessages.push(messages[0]);
-      //保存第一个描述了任务的User messages
-      comporessMessages.push(messages[1]);
+      let compressMessages: Message[] = [];
+      // 保存 System messages
+      compressMessages.push(messages[0]);
+      // 保存第一个描述了任务的 User messages
+      compressMessages.push(messages[1]);
 
       let inputMessages = messages.slice(2, -2);
       inputMessages.unshift({ role: 'user', content: '[Task history memory begins]' });
       inputMessages.unshift(this.SystemMessage);
-      this.llmProvider.generateText(inputMessages, this.params_copy).then((r) =>
-        comporessMessages.push({
+
+      // 等待 generateText 完成
+      const result = await this.llmProvider.generateText(inputMessages, this.params_copy);
+      compressMessages.push({
           role: 'assistant',
-          content: r.content,
-        })
-      );
-      comporessMessages.push(this.HistoryMessage);
-      //保存最后两条assitant message 和user message
-      comporessMessages.push(...messages.slice(-2));
-      return comporessMessages;
+          content: result.content,
+      });
+
+      compressMessages.push(this.HistoryMessage);
+      // 保存最后两条 Assistant message 和 User message
+      compressMessages.push(...messages.slice(-2));
+      return compressMessages;
     }
   }
 }
