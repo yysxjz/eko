@@ -1,24 +1,24 @@
 import { LLMParameters, LLMProvider, Message, ToolCall } from '@/types';
 import { logger } from './log';
 
-export abstract class ContextComporessor {
-  public abstract comporess(messages: Message[]): Promise<Message[]>;
+export abstract class ContextCompressor {
+  public abstract compress(messages: Message[]): Promise<Message[]>;
 }
 
-export class NoComporess extends ContextComporessor {
-  public async comporess(messages: Message[]): Promise<Message[]> {
-    logger.debug('ContextComporessor = NoComporess');
-    let comporessed = JSON.parse(JSON.stringify(messages));
-    logger.debug('comporessed:', comporessed);
-    return Promise.resolve(comporessed);
+export class NoCompress extends ContextCompressor {
+  public async compress(messages: Message[]): Promise<Message[]> {
+    logger.debug('ContextCompressor = NoCompress');
+    let compressed = JSON.parse(JSON.stringify(messages));
+    logger.debug('compressed:', compressed);
+    return Promise.resolve(compressed);
   }
 }
 
-export class SimpleQAComporess extends ContextComporessor {
-  public async comporess(messages: Message[]): Promise<Message[]> {
-    logger.debug('ContextComporessor = SimpleQAComporess');
+export class SimpleQACompress extends ContextCompressor {
+  public async compress(messages: Message[]): Promise<Message[]> {
+    logger.debug('ContextCompressor = SimpleQACompress');
     messages = JSON.parse(JSON.stringify(messages));
-    let comporessed: Message[] = [];
+    let compressed: Message[] = [];
     const compress = (msg: Message, idx: number) => {
       if (msg.role == 'system') {
         return msg;
@@ -64,15 +64,15 @@ export class SimpleQAComporess extends ContextComporessor {
       const compressedMsg = compress(msg, idx);
       logger.debug(compressedMsg);
       if (compressedMsg) {
-        comporessed.push(compressedMsg);
+        compressed.push(compressedMsg);
       } else {
       }
     });
-    return Promise.resolve(comporessed);
+    return Promise.resolve(compressed);
   }
 }
 
-export class SummaryComporess extends ContextComporessor {
+export class SummaryCompress extends ContextCompressor {
   private llmProvider: LLMProvider;
   private SystemMessage: Message;
   private HistoryMessage: Message;
