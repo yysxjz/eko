@@ -177,16 +177,15 @@ export class SummaryCompress extends ContextCompressor {
       return messages;
     } else {
       let compressMessages: Message[] = [];
-      // 保存 System messages
+      // system message: You are an AI agent...
       compressMessages.push(messages[0]);
-      // 保存第一个描述了任务的 User messages
+      // user message: Your ultimate task is...
       compressMessages.push(messages[1]);
 
       let inputMessages = messages.slice(2, -2);
       inputMessages.unshift({ role: 'user', content: '[Task history memory begins]' });
       inputMessages.unshift(this.SystemMessage);
 
-      // 等待 generateText 完成
       const result = await this.llmProvider.generateText(inputMessages, this.params_copy);
       compressMessages.push({
           role: 'assistant',
@@ -194,7 +193,7 @@ export class SummaryCompress extends ContextCompressor {
       });
 
       compressMessages.push(this.HistoryMessage);
-      // 保存最后两条 Assistant message 和 User message
+      // push last 2 messages for tool_call and tool_call_result pair
       compressMessages.push(...messages.slice(-2));
       return compressMessages;
     }
