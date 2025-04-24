@@ -34,11 +34,20 @@ export class Eko {
     this.ekoConfig = this.buildEkoConfig(ekoConfig);
     this.registerTools();
     logger.info("using Eko@" + process.env.COMMIT_HASH);
-    logger.debug("caller's ekoConfig:", ekoConfig);
+    logger.debug("caller's ekoConfig ('chromeProxy' maybe 'null'):", ekoConfig);
+    console.log(ekoConfig);
   }
 
   public static getLogger(): Logger<ILogObj> {
     return logger;
+  }
+
+  public getLoggerInstaceUUID(): string {
+    if (this.ekoConfig.loggerInstaceUUID) {
+      return this.ekoConfig.loggerInstaceUUID;
+    } else {
+      throw Error("loggerInstaceUUID is not configured");
+    }
   }
 
   private buildEkoConfig(ekoConfig: Partial<EkoConfig> | undefined): EkoConfig {
@@ -50,6 +59,7 @@ export class Eko {
       chromeProxy: typeof chrome === 'undefined' ? undefined : chrome,
       callback: undefined,
       patchServerUrl: "http://127.0.0.1:8000/eko",
+      loggerInstaceUUID: undefined,
     };
     return {
       ...defaultEkoConfig,
@@ -136,7 +146,6 @@ export class Eko {
               'extract_content',
               'open_url',
               'tab_management',
-              'switch_tab',
               'web_search',
               'human_input_text',
               'human_input_single_choice',

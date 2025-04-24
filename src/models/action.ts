@@ -221,6 +221,8 @@ export class ActionImpl implements Action {
               // Execute the tool
               let result = await tool.execute(context, input);
               // afterToolUse
+              let existingTabs: chrome.tabs.Tab[] = await context.ekoConfig.chromeProxy.tabs.query({});
+              logger.debug("all tabs:", existingTabs);          
               if (context.callback && context.callback.hooks.afterToolUse) {
                 let modified_result = await context.callback.hooks.afterToolUse(
                   tool,
@@ -444,11 +446,9 @@ export class ActionImpl implements Action {
     toolMap.set(returnTool.name, returnTool);
 
     // get already existing tabs as task background
-    const currentWindow = await context.ekoConfig.chromeProxy.windows.getCurrent();
-    let existingTabs: chrome.tabs.Tab[] = await context.ekoConfig.chromeProxy.tabs.query({
-      windowId: currentWindow.id,
-    });
-    existingTabs = existingTabs.filter((tab) => {tab.title && tab.url});
+    let existingTabs: chrome.tabs.Tab[] = await context.ekoConfig.chromeProxy.tabs.query({});
+    logger.debug("all tabs:", existingTabs);
+    existingTabs = existingTabs.filter((tab) => tab.title && tab.url);
     logger.debug("existingTabs:", existingTabs);
 
     // get patchs for task
